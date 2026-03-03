@@ -16,8 +16,7 @@ from pose_format.utils.generic import (
     pose_normalization_info,
     reduce_holistic,
 )
-from spoken_to_signed.gloss_to_pose.smoothing import smooth_concatenate_poses
-from spoken_to_signed.gloss_to_pose.concatenate import ConcatenationSettings,normalize_pose,trim_pose,concatenate_poses
+from spoken_to_signed.gloss_to_pose.concatenate import concatenate_poses
 from typing import Union
 from pose_anonymization.appearance import (
     remove_appearance,
