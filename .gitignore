@@ -1,1 +1,10 @@
 venv
+.idea/
+spoken-to-signed-translation/build/
+spoken-to-signed-translation/spoken_to_signed.egg-info/
+spoken-to-signed-translation/.env
+**/__pycache__/
+spoken-to-signed-translation/.DS_Store
+spoken-to-signed-translation/*.code-workspace
+spoken-to-signed-translation/dist/
+spoken-to-signed-translation/quick_test.pose

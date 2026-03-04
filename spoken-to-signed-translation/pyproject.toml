@@ -1,0 +1,89 @@
+[project]
+name = "spoken-to-signed"
+description = "Simple pipeline for spoken to signed translation"
+version = "0.0.2"
+requires-python = ">=3.9"
+authors = [
+    { name = "Amit Moryossef", email = "amitmoryossef@gmail.com" },
+    { name = "Mathias Müller", email = "mmueller@cl.uzh.ch" }
+]
+readme = "README.md"
+dependencies = [
+    "pose-format>=0.4.1",
+    "pose_anonymization",
+    "numpy",
+    "scipy",
+    "simplemma>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+lexicon = [
+    "sign-language-datasets",
+]
+spacy = [
+    "spacy",
+]
+nmt = [
+    "sentencepiece",
+    "sockeye==3.1.10",
+]
+gcs = [
+    "gcsfs",
+]
+all = [
+    "spoken-to-signed[spacy,nmt,gcs,lexicon]",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "C90",  # mccabe complexity
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "PT",   # flake8-pytest-style
+    "W605", # invalid escape sequence
+    "BLE",  # flake8-blind-except
+]
+
+[tool.ruff.lint.per-file-ignores]
+"spoken_to_signed/download_lexicon.py" = ["F401"]  # TFDS datasets should be imported
+"spoken_to_signed/text_to_gloss/gpt.py" = ["E501"]  # Long lines in prompt strings
+"spoken_to_signed/text_to_gloss/rules.py" = ["E501", "C901"]  # Long comments, complex function
+
+[tool.setuptools]
+packages = [
+    "spoken_to_signed",
+    "spoken_to_signed.assets",
+    "spoken_to_signed.text_to_gloss",
+    "spoken_to_signed.gloss_to_pose",
+    "spoken_to_signed.gloss_to_pose.lookup",
+    "spoken_to_signed.pose_to_video",
+]
+include-package-data = true
+
+[tool.setuptools.package-data]
+spoken_to_signed = [
+    "*.pth",
+    "assets/*",
+]
+
+[tool.pytest.ini_options]
+addopts = "-v"
+testpaths = ["spoken_to_signed", "tests"]
+
+[project.scripts]
+download_lexicon = "spoken_to_signed.download_lexicon:main"
+text_to_gloss = "spoken_to_signed.bin:text_to_gloss"
+text_to_gloss_to_pose = "spoken_to_signed.bin:text_to_gloss_to_pose"
+text_to_gloss_to_pose_to_video = "spoken_to_signed.bin:text_to_gloss_to_pose_to_video"
