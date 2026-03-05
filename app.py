@@ -90,7 +90,13 @@ def translate(input_text: str, dialect: str):
 
         # Top-1 retrieval per token from Step 5-6
         retrievals     = result.get("retrievals", {})
-        top1           = {t: hits[0] if hits else None for t, hits in retrievals.items()}
+        top1 = {}
+        for token, hits in retrievals.items():
+            if hits:
+                best = dict(hits[0])
+                top1[token] = best
+            else:
+                top1[token] = None
         retrievals_str = json.dumps(top1, ensure_ascii=False, indent=2)
 
         return output_video, gloss_str, tokens_str, retrievals_str
