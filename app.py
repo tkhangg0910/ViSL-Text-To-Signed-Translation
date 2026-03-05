@@ -15,21 +15,21 @@ load_dotenv()
 # DIALECT CONFIGURATION — each dialect uses its own FAISS index + metadata
 DIALECT_CONFIG = {
     "🇳 North": {
-        "faiss_index": "./pose_databases/index_mean_AB.faiss",
-        "metadata":    "./pose_databases/metadata_mean_AB.json",
+        "faiss_index": "/content/index_mean_AB.faiss",
+        "metadata":    "/content/metadata_mean_AB.json",
     },
     "🇨 Central": {
-        "faiss_index": "./pose_databases/index_mean_AT.faiss",
-        "metadata":    "./pose_databases/metadata_mean_AT.json",
+        "faiss_index": "/content/index_mean_AT.faiss",
+        "metadata":    "/content/metadata_mean_AT.json",
     },
     "🇸 South": {
-        "faiss_index": "./pose_databases/index_mean_AN.faiss",
-        "metadata":    "./pose_databases/metadata_mean_AN.json",
+        "faiss_index": "/content/index_mean_AN.faiss",
+        "metadata":    "/content/metadata_mean_AN.json",
     },
 }
 
 EMBEDDING_MODEL_PATH = "tkhangg0910/viconbert-large"
-POSES_PATH           = "./poses/"
+POSES_PATH           = "/content/poses/"
 
 # LOAD EMBEDDING MODEL — runs once at startup
 print("⏳ Loading embedding model...")
