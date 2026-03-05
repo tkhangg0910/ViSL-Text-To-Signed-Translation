@@ -158,18 +158,20 @@ class WordSegmenter:
             word = e["word"]
             if "##" in word:
                 merged += word.replace("##", "")
-            elif e["entity"] == "LABEL_1":  
+            elif e["entity"] == "LABEL_1":  # I-W: nối vào từ trước
                 merged += "_" + word
-            else:  
+            else:  # B-W: từ mới
                 merged += " " + word
         return [s.replace("_", " ") for s in merged.split()]
 
 
 class EmbeddingRetriever:
+    """Quản lý embedding model, FAISS index và truy vấn top-k pose."""
+
     def __init__(
         self,
-        embedding_model,     
-        tokenizer,             
+        embedding_model,       # model đã load (AutoModel hoặc custom)
+        tokenizer,             # tokenizer tương ứng
         faiss_index_path: str,
         metadata_path: str,
     ):
@@ -193,19 +195,11 @@ class EmbeddingRetriever:
             vec = self.model(tokenized, span)
         return vec.detach().cpu().numpy()
 
-    def retrieve(self, sentence: str, target: str, top_k: int = 10, threshold: float = 0.0) -> list[dict]:
+    def retrieve(self, sentence: str, target: str, top_k: int = 10) -> list[dict]:
+        """Truy vấn FAISS, trả về top_k metadata gần nhất."""
         vec = self.embed(sentence, target)
         distances, indices = self.index.search(vec, k=top_k)
-        results = []
-        for dist, idx in zip(distances[0], indices[0]):
-            similarity = 1.0 / (1.0 + float(dist))
-            if similarity >= threshold:
-                entry = dict(self.metadata[idx])
-                entry["similarity"] = round(similarity, 4)
-                results.append(entry)
-
-        return results
-
+        return [self.metadata[i] for i in indices[0]]
 
 
 
@@ -251,7 +245,7 @@ class ViSLPipeline:
         return tokens
 
     def step5_6_retrieve(
-        self, original_sentence: str, tokens: list[str], top_k: int = 5, threshold: float = 0.0
+        self, original_sentence: str, tokens: list[str], top_k: int = 5
     ) -> dict[str, list[dict]]:
         if self.retriever is None:
             print("[step 5-6] EmbeddingRetriever has not initialized yet.")
@@ -260,7 +254,7 @@ class ViSLPipeline:
         results = {}
         for token in tokens:
             try:
-                hits = self.retriever.retrieve(original_sentence, token, top_k=top_k, threshold=threshold)
+                hits = self.retriever.retrieve(original_sentence, token, top_k=top_k)
                 results[token] = hits
             except ValueError as e:
                 print(f"[step 5-6 - Retrieve] token error '{token}': {e}")
