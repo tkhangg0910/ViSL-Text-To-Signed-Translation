@@ -10,26 +10,76 @@ from dotenv import load_dotenv
 from visl_pipeline import ViSLPipeline
 # Load environment variables
 load_dotenv()
+import argparse
 
 
-# DIALECT CONFIGURATION — each dialect uses its own FAISS index + metadata
-DIALECT_CONFIG = {
-    "🇳 North": {
-        "faiss_index": "./pose_databases/index_mean_AB.faiss",
-        "metadata":    "./pose_databases/metadata_mean_AB.json",
-    },
-    "🇨 Central": {
-        "faiss_index": "./pose_databases/index_mean_AT.faiss",
-        "metadata":    "./pose_databases/metadata_mean_AT.json",
-    },
-    "🇸 South": {
-        "faiss_index": "./pose_databases/index_mean_AN.faiss",
-        "metadata":    "./pose_databases/metadata_mean_AN.json",
-    },
-}
+def parse_args():
+    parser = argparse.ArgumentParser(description="ViSL Translator")
 
-EMBEDDING_MODEL_PATH = "tkhangg0910/viconbert-large"
-POSES_PATH           = "./poses/"
+    # mode
+    parser.add_argument("--advanced", action="store_true",
+                        help="Use advanced configuration")
+
+    # basic arg
+    parser.add_argument("--model_type", type=str, default="large",
+                        help="Model type: base / large")
+
+    # advanced args
+    parser.add_argument("--poses_path", type=str)
+    parser.add_argument("--embedding_model", type=str)
+
+    parser.add_argument("--index_north", type=str)
+    parser.add_argument("--meta_north", type=str)
+
+    parser.add_argument("--index_central", type=str)
+    parser.add_argument("--meta_central", type=str)
+
+    parser.add_argument("--index_south", type=str)
+    parser.add_argument("--meta_south", type=str)
+
+    return parser.parse_args()
+args = parse_args()
+
+if not args.advanced:
+    # BASIC MODE
+    POSES_PATH = "./poses/"
+
+    EMBEDDING_MODEL_PATH = f"tkhangg0910/viconbert-{args.model_type}"
+
+    DIALECT_CONFIG = {
+        "🇳 North": {
+            "faiss_index": f"./pose_databases/index_mean_AB_{args.model_type}.faiss",
+            "metadata": f"./pose_databases/metadata_mean_AB_{args.model_type}.json",
+        },
+        "🇨 Central": {
+            "faiss_index": f"./pose_databases/index_mean_AT_{args.model_type}.faiss",
+            "metadata": f"./pose_databases/metadata_mean_AT_{args.model_type}.json",
+        },
+        "🇸 South": {
+            "faiss_index": f"./pose_databases/index_mean_AN_{args.model_type}.faiss",
+            "metadata": f"./pose_databases/metadata_mean_AN_{args.model_type}.json",
+        },
+    }
+
+else:
+    # ADVANCED MODE
+    POSES_PATH = args.poses_path
+    EMBEDDING_MODEL_PATH = args.embedding_model
+
+    DIALECT_CONFIG = {
+        "🇳 North": {
+            "faiss_index": args.index_north,
+            "metadata": args.meta_north,
+        },
+        "🇨 Central": {
+            "faiss_index": args.index_central,
+            "metadata": args.meta_central,
+        },
+        "🇸 South": {
+            "faiss_index": args.index_south,
+            "metadata": args.meta_south,
+        },
+    }
 
 # LOAD EMBEDDING MODEL — runs once at startup
 print("⏳ Loading embedding model...")
