@@ -159,7 +159,7 @@ footer  { display: none !important; }
 """
 
 EXAMPLES = [
-    ["Ngày mai tôi đến phòng giao dịch ngân hàng."],
+    ["Ngày mai tôi đến ngân hàng."],
     ["Hôm nay trời nắng đẹp."],
     ["Bạn tên gì?"],
     ["Tôi muốn học ngôn ngữ ký hiệu."],
