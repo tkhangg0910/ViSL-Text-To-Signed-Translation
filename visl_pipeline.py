@@ -6,8 +6,9 @@ import faiss
 import numpy as np
 from string import Template
 from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
-from transformers import AutoModel, PhobertTokenizerFast,AutoTokenizer
+from transformers import AutoModel, PhobertTokenizerFast, AutoTokenizer
 import numpy as np
 from pose_format import Pose
 from pose_format.utils.generic import (
@@ -25,6 +26,8 @@ from pose_anonymization.appearance import (
 from underthesea import text_normalize as text_normalize_uts
 from text_normalizer import text_normalize
 from span_extractor import SpanExtractor
+
+
 def normalize_text(text: str) -> str:
     """Chuẩn hóa văn bản: sửa lỗi chính tả, chuẩn hóa dấu câu và format."""
     return text_normalize_uts(text)
@@ -117,14 +120,15 @@ def gloss_to_token_list(gloss: dict) -> list[str]:
             tokens.extend(values)
     return tokens
 
+
 def read_pose(pose_path: str):
     pose_path = os.path.join(pose_path)
     with open(pose_path, "rb") as f:
         return Pose.read(f.read())
 
-def gloss_to_pose(retrieved_glosses_path, anonymize: Union[bool, Pose] = False,) -> Pose:
+
+def gloss_to_pose(retrieved_glosses_path, anonymize: Union[bool, Pose] = False) -> Pose:
     poses = [read_pose(path) for path in retrieved_glosses_path]
-    # Anonymize poses
     if anonymize:
         if isinstance(anonymize, Pose):
             print("Transferring appearance...")
@@ -132,9 +136,8 @@ def gloss_to_pose(retrieved_glosses_path, anonymize: Union[bool, Pose] = False,)
         else:
             print("Removing appearance...")
             poses = [remove_appearance(pose) for pose in poses]
-
-    # Concatenate the poses to create a single pose
     return concatenate_poses(poses)
+
 
 from transformers import pipeline as hf_pipeline, AutoTokenizer, AutoModelForTokenClassification
 
@@ -165,13 +168,11 @@ class WordSegmenter:
         return [s.replace("_", " ") for s in merged.split()]
 
 
-class EmbeddingRetriever:
-    """Quản lý embedding model, FAISS index và truy vấn top-k pose."""
-
+class SingleModelRetriever:
     def __init__(
         self,
-        embedding_model,       # model đã load (AutoModel hoặc custom)
-        tokenizer,             # tokenizer tương ứng
+        embedding_model,
+        tokenizer,
         faiss_index_path: str,
         metadata_path: str,
     ):
@@ -185,8 +186,7 @@ class EmbeddingRetriever:
             self.metadata = json.load(f)
 
     def embed(self, sentence: str, target: str) -> np.ndarray:
-        """Tạo contextual embedding cho target trong sentence."""
-        normed_sentence=text_normalize(sentence)
+        normed_sentence = text_normalize(sentence)
         tokenized = self.tokenizer(normed_sentence, return_tensors="pt").to(self.device)
         span_idx = self.span_extractor.get_span_indices(sentence, target)
         span = torch.tensor(span_idx).unsqueeze(0).to(self.device)
@@ -196,11 +196,112 @@ class EmbeddingRetriever:
         return vec.detach().cpu().numpy()
 
     def retrieve(self, sentence: str, target: str, top_k: int = 10) -> list[dict]:
-        """Truy vấn FAISS, trả về top_k metadata gần nhất."""
+        """Trả về top_k kết quả kèm similarity score."""
         vec = self.embed(sentence, target)
         distances, indices = self.index.search(vec, k=top_k)
-        return [self.metadata[i] for i in indices[0]]
+        results = []
+        for dist, idx in zip(distances[0], indices[0]):
+            item = dict(self.metadata[idx])   # shallow copy để tránh mutate
+            item["_similarity"] = float(dist)
+            results.append(item)
+        return results
 
+
+class EmbeddingRetriever:
+
+    def __init__(
+        self,
+        # --- single-model args (backward-compatible) ---
+        embedding_model=None,
+        tokenizer=None,
+        faiss_index_path: str = None,
+        metadata_path: str = None,
+        # --- ensemble args ---
+        embedding_model_2=None,
+        tokenizer_2=None,
+        faiss_index_path_2: str = None,
+        metadata_path_2: str = None,
+    ):
+        self._ensemble = False
+        self._retrievers: list[SingleModelRetriever] = []
+
+        # Khởi tạo retriever thứ nhất (bắt buộc)
+        if all([embedding_model, tokenizer, faiss_index_path, metadata_path]):
+            self._retrievers.append(
+                SingleModelRetriever(embedding_model, tokenizer, faiss_index_path, metadata_path)
+            )
+
+        # Khởi tạo retriever thứ hai (tuỳ chọn, kích hoạt ensemble)
+        if all([embedding_model_2, tokenizer_2, faiss_index_path_2, metadata_path_2]):
+            self._retrievers.append(
+                SingleModelRetriever(embedding_model_2, tokenizer_2, faiss_index_path_2, metadata_path_2)
+            )
+            self._ensemble = True
+            print("[EmbeddingRetriever] Ensemble mode: 2 models loaded.")
+        else:
+            print("[EmbeddingRetriever] Single model mode.")
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def retrieve(self, sentence: str, target: str, top_k: int = 10) -> list[dict]:
+        """
+        Truy vấn top_k kết quả.
+        - Single mode : dùng retriever duy nhất.
+        - Ensemble    : infer song song 2 model, merge kết quả (dedupe theo Path),
+                        sort giảm dần theo similarity, trả về top_k.
+        """
+        if not self._ensemble:
+            # backward-compatible: strip internal _similarity key
+            hits = self._retrievers[0].retrieve(sentence, target, top_k)
+            for h in hits:
+                h.pop("_similarity", None)
+            return hits
+
+        return self._ensemble_retrieve(sentence, target, top_k)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _ensemble_retrieve(self, sentence: str, target: str, top_k: int) -> list[dict]:
+        fetch_k = max(top_k * 2, 20)
+
+        futures_results: list[list[dict]] = [None, None]
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_map = {
+                executor.submit(r.retrieve, sentence, target, fetch_k): i
+                for i, r in enumerate(self._retrievers)
+            }
+            for future in as_completed(future_map):
+                idx = future_map[future]
+                try:
+                    futures_results[idx] = future.result()
+                except Exception as e:
+                    print(f"[Ensemble] Retriever {idx} failed for token '{target}': {e}")
+                    futures_results[idx] = []
+
+        merged = self._merge(futures_results[0] or [], futures_results[1] or [])
+        for item in merged:
+            item.pop("_similarity", None)
+        return merged[:top_k]
+
+    @staticmethod
+    def _merge(hits_a: list[dict], hits_b: list[dict]) -> list[dict]:
+        """
+        Dedupe theo Path, giữ similarity cao nhất, sort giảm dần.
+        """
+        best: dict[str, dict] = {}
+
+        for item in hits_a + hits_b:
+            path = item.get("Path", "")
+            sim = item.get("_similarity", 0.0)
+            if path not in best or sim > best[path]["_similarity"]:
+                best[path] = item
+
+        return sorted(best.values(), key=lambda x: x["_similarity"], reverse=True)
 
 
 class ViSLPipeline:
@@ -210,34 +311,44 @@ class ViSLPipeline:
       step 3:     Text-to-Gloss
       step 4:     Word Segmentation
       step 5-6:   Embedding + Vector DB Retrieval
+      step 7:     Skeleton generation & pose smoothing
     """
 
     def __init__(
         self,
         poses_path,
+        # --- model 1 (always required) ---
         embedding_model=None,
         embedding_tokenizer=None,
         faiss_index_path: str = None,
-        metadata_path: str = None
+        metadata_path: str = None,
+        # --- model 2 (optional, enables ensemble) ---
+        embedding_model_2=None,
+        embedding_tokenizer_2=None,
+        faiss_index_path_2: str = None,
+        metadata_path_2: str = None,
     ):
         self.segmenter = WordSegmenter()
         self.poses_path = poses_path
         self.retriever = None
+
         if all([embedding_model, embedding_tokenizer, faiss_index_path, metadata_path]):
             self.retriever = EmbeddingRetriever(
                 embedding_model=embedding_model,
                 tokenizer=embedding_tokenizer,
                 faiss_index_path=faiss_index_path,
                 metadata_path=metadata_path,
+                embedding_model_2=embedding_model_2,
+                tokenizer_2=embedding_tokenizer_2,
+                faiss_index_path_2=faiss_index_path_2,
+                metadata_path_2=metadata_path_2,
             )
 
     def step2_normalize(self, text: str) -> str:
-        result = normalize_text(text)
-        return result
+        return normalize_text(text)
 
     def step3_gloss(self, text: str) -> dict | None:
-        result = text_to_gloss(text)
-        return result
+        return text_to_gloss(text)
 
     def step4_segment(self, gloss: dict) -> list[str]:
         flat_text = " ".join(gloss_to_token_list(gloss))
@@ -261,7 +372,7 @@ class ViSLPipeline:
                 results[token] = []
         return results
 
-    def step_7_skeleton_generation_and_pose_smoothing(self,retrievals):
+    def step_7_skeleton_generation_and_pose_smoothing(self, retrievals):
         best_retrieval = {
             k: v[0] for k, v in retrievals.items() if len(v) > 0
         }
@@ -273,18 +384,15 @@ class ViSLPipeline:
         return concat_pose
 
     def run(self, input_text: str, output_path, top_k: int = 5) -> dict:
-
-        normalized   = self.step2_normalize(input_text)
-        gloss        = self.step3_gloss(normalized)
+        normalized = self.step2_normalize(input_text)
+        gloss = self.step3_gloss(normalized)
 
         if gloss is None:
             print("[Pipeline] Cannot create gloss. stop pipeline.")
             return {}
-        tokens       = self.step4_segment(gloss)
-        concat_tokens =" ".join(tokens)
 
-        retrievals   = self.step5_6_retrieve(normalized, tokens, top_k=top_k)
-
+        tokens = self.step4_segment(gloss)
+        retrievals = self.step5_6_retrieve(normalized, tokens, top_k=top_k)
         concatenated_pose = self.step_7_skeleton_generation_and_pose_smoothing(retrievals)
 
         from pose_format.pose_visualizer import PoseVisualizer
@@ -292,10 +400,9 @@ class ViSLPipeline:
         v.save_video(output_path, v.draw())
 
         return {
-            "input":       input_text,
-            "normalized":  normalized,
-            "gloss":       gloss,
-            "tokens":      tokens,
-            "retrievals":  retrievals,
+            "input":      input_text,
+            "normalized": normalized,
+            "gloss":      gloss,
+            "tokens":     tokens,
+            "retrievals": retrievals,
         }
-
