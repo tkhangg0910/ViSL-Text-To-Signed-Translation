@@ -147,8 +147,18 @@ class WordSegmenter:
 
     def __init__(self):
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        tokenizer = AutoTokenizer.from_pretrained(self.MODEL_PATH)
-        model = AutoModelForTokenClassification.from_pretrained(self.MODEL_PATH)
+        CACHE_DIR = "./models_cache"
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            self.MODEL_PATH,
+            cache_dir=CACHE_DIR
+        )
+
+        model = AutoModelForTokenClassification.from_pretrained(
+            self.MODEL_PATH,
+            cache_dir=CACHE_DIR
+        )
+
         self.nlp = hf_pipeline(
             "token-classification", model=model, tokenizer=tokenizer, device=device
         )

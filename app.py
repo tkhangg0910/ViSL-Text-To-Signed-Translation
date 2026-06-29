@@ -233,7 +233,8 @@ def translate(input_text: str, dialect: str):
 
     try:
         pipeline     = get_pipeline(dialect)
-        output_video = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+        os.makedirs("./outputs", exist_ok=True)
+        output_video = tempfile.NamedTemporaryFile(suffix=".mp4",dir="./outputs", delete=False).name
         result       = pipeline.run(input_text, output_path=output_video, top_k=5)
 
         if not result:
@@ -319,7 +320,7 @@ with gr.Blocks(css=CSS, title="ViSL Translator", theme=gr.themes.Soft()) as demo
             video_output = gr.Video(
                 label="Generated Pose Video",
                 autoplay=True,
-                show_download_button=True,
+                # show_download_button=True,
             )
 
     with gr.Accordion("🔍 Pipeline Details (Gloss / Tokens / Retrieval)", open=False):
